@@ -1,0 +1,525 @@
+ID,DocType,Apply To,Module (for export),Enabled,Script
+Purchase Receipt Total Quantity = Received Warehouse,Purchase Receipt,Form,,0,"console.log('--- Purchase Receipt Totals Script Loaded ---');
+
+(() => {
+    const debounceDelay = 150;
+    let debounceTimer;
+
+    const scheduleTotalsUpdate = (frm) => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => updateParentTotals(frm), debounceDelay);
+    };
+
+    const getAcceptedQuantity = (item) => {
+        if (item.accepted_qty != null) {
+            return flt(item.accepted_qty);
+        }
+        if (item.qty != null) {
+            return flt(item.qty);
+        }
+        return 0;
+    };
+
+    const updateParentTotals = (frm) => {
+        let totalAccepted = 0;
+        let totalBlemish = 0;
+        let totalRejected = 0;
+
+        (frm.doc.items || []).forEach((item) => {
+            const warehouse = (item.warehouse || '').toLowerCase();
+            const acceptedQty = getAcceptedQuantity(item);
+            const blemishQty = flt(item.custom_blemish_quantity || 0);
+            const rejectedQty = flt(item.rejected_qty || 0);
+
+            if (warehouse.includes('blemish')) {
+                totalBlemish += blemishQty || acceptedQty;
+            } else if (warehouse.includes('store')) {
+                totalAccepted += acceptedQty;
+            }
+
+            totalRejected += rejectedQty;
+        });
+
+        const totalReceived = totalAccepted + totalBlemish + totalRejected;
+
+        frm.set_value('total_qty', flt(totalAccepted));
+        frm.set_value('custom_total_blemish_quantity', flt(totalBlemish));
+        frm.set_value('custom_total_rejected_quantity', flt(totalRejected));
+        frm.set_value('custom_total_received', flt(totalReceived));
+    };
+
+    frappe.ui.form.on('Purchase Receipt Item', {
+        accepted_qty: scheduleTotalsUpdate,
+        qty: scheduleTotalsUpdate,
+        custom_blemish_quantity: scheduleTotalsUpdate,
+        rejected_qty: scheduleTotalsUpdate,
+        warehouse: scheduleTotalsUpdate,
+        items_add: scheduleTotalsUpdate,
+        items_remove: scheduleTotalsUpdate,
+        form_render: scheduleTotalsUpdate,
+    });
+
+    frappe.ui.form.on('Purchase Receipt', {
+        refresh(frm) {
+            scheduleTotalsUpdate(frm);
+        },
+        validate(frm) {
+            updateParentTotals(frm);
+        },
+    });
+})();"
+Credit Limit base on Facility Type,Customer,Form,,1,"frappe.ui.form.on('Customer', {
+    refresh(frm) {
+        restrict_credit_limit_access(frm);
+    },
+    custom_facility_type(frm) {
+        update_credit_limit(frm);
+    }
+});
+
+function restrict_credit_limit_access(frm) {
+    // Disable the child table fields by default
+    frm.fields_dict.credit_limits.grid.wrapper.find('.grid-remove-rows').hide();
+    frm.fields_dict.credit_limits.grid.wrapper.find('.grid-add-row').hide();
+    
+    // Check user roles
+    if (!frappe.user.has_role('Accounts Manager') && !frappe.user.has_role('System Manager')) {
+        // Loop through each row and disable editing
+        frm.fields_dict.credit_limits.grid.wrapper.find('[data-fieldname=""credit_limit""]').prop('disabled', true);
+    } else {
+        // Show add/remove buttons for authorized users
+        frm.fields_dict.credit_limits.grid.wrapper.find('.grid-remove-rows').show();
+        frm.fields_dict.credit_limits.grid.wrapper.find('.grid-add-row').show();
+    }
+}
+
+function update_credit_limit(frm) {
+    if (!frm.doc.custom_facility_type) return;
+
+    const limits = {
+        'Hospital': 40000,
+        'Surgery Center': 10000,
+        'Urgent Care': 10000,
+        'Veterinary': 10000,
+        'B2B': 999999,
+        'Wholesale': 999999
+    };
+
+    const new_limit = limits[frm.doc.custom_facility_type] || 0;
+
+    // Find existing child or create new
+    let child = frm.doc.credit_limits && frm.doc.credit_limits.length > 0
+        ? frm.doc.credit_limits[0]
+        : frm.add_child('credit_limits', { company: frappe.defaults.get_default('company') });
+
+    frappe.model.set_value(child.doctype, child.name, 'credit_limit', new_limit);
+    frm.refresh_field('credit_limits');
+}
+"
+Customer Statement Print Buttons,Customer Statement,Form,,1,"frappe.ui.form.on('Customer Statement', {
+    refresh: function(frm) {
+        // Only show buttons if document is saved
+        if (!frm.is_new()) {
+            // Remove default print button group to avoid confusion
+            frm.page.clear_primary_action();
+            
+            // Button 1: Full Customer Statement
+            frm.add_custom_button(__('Full Statement'), function() {
+                var print_format = 'Surgi Customer Statement';
+                var url = frappe.urllib.get_full_url(
+                    '/printview?'
+                    + 'doctype=' + encodeURIComponent(frm.doc.doctype)
+                    + '&name=' + encodeURIComponent(frm.doc.name)
+                    + '&format=' + encodeURIComponent(print_format)
+                    + '&no_letterhead=0'
+                    + '&letterhead=Your%20Letter%20Head'
+                    + '&settings=%7B%7D'
+                    + '&_lang=en'
+                );
+                window.open(url, '_blank');
+            }, __('Print'));
+            
+            // Button 2: Transaction Statement
+            frm.add_custom_button(__('Transaction Statement'), function() {
+                var print_format = 'Surgi Transaction Statement';
+                var url = frappe.urllib.get_full_url(
+                    '/printview?'
+                    + 'doctype=' + encodeURIComponent(frm.doc.doctype)
+                    + '&name=' + encodeURIComponent(frm.doc.name)
+                    + '&format=' + encodeURIComponent(print_format)
+                    + '&no_letterhead=0'
+                    + '&letterhead=Your%20Letter%20Head'
+                    + '&settings=%7B%7D'
+                    + '&_lang=en'
+                );
+                window.open(url, '_blank');
+            }, __('Print'));
+            
+            // Add this as the third button in your existing client script
+            frm.add_custom_button(__('Open Items'), function() {
+                var print_format = 'Surgi Open Items Statement';
+                 var url = frappe.urllib.get_full_url(
+                    '/printview?'
+                    + 'doctype=' + encodeURIComponent(frm.doc.doctype)
+                    + '&name=' + encodeURIComponent(frm.doc.name)
+                    + '&format=' + encodeURIComponent(print_format)
+                    + '&no_letterhead=0'
+                    + '&letterhead=Your%20Letter%20Head'
+                    + '&settings=%7B%7D'
+                    + '&_lang=en'
+                );
+                window.open(url, '_blank');
+            }, __('Print'));
+        }
+    }
+});"
+Customer Credit Field,Customer,Form,,1,"// This script runs when a Customer document is opened or refreshed
+
+frappe.ui.form.on('Customer', {
+    refresh: function(frm) {
+        // The frappe.call is used to execute a Python function on the server side
+        frappe.call({
+            // Function to call for calculating the customer/party balance on a given date
+            method: ""erpnext.accounts.utils.get_balance_on"",
+            args: {
+                // The balance must be calculated up to the current date (today)
+                date: frappe.datetime.nowdate(),
+                party_type: 'Customer',
+                // The name of the current Customer being viewed
+                party: frm.doc.name
+            },
+            callback: function(r) {
+                if (r.message) {
+                    // r.message contains the calculated balance (e.g., -100.00 for a credit)
+                    var balance = r.message;
+                    
+                    // Set the value of your custom field
+                    frm.set_value('custom_customer_credit', balance);
+                    
+                    // Refresh the field to display the new value immediately
+                    frm.refresh_field('custom_customer_credit');
+                }
+            }
+        });
+    }
+});"
+Credit Memo Print Format,Sales Invoice,Form,,1,"// Sales Invoice Client Script
+frappe.ui.form.on('Sales Invoice', {
+    // This runs when the form is first loaded
+    onload: function(frm) {
+        set_print_format(frm);
+    },
+    
+    // This runs after the document is submitted
+    after_save: function(frm) {
+        // Only necessary if the print format needs to update after submission logic
+        set_print_format(frm);
+    }
+});
+
+var set_print_format = function(frm) {
+    if (frm.doc.is_return === 1) {
+        // Set the default print format to your Credit Note format
+        frm.meta.default_print_format = ""Surgi Credit Memo"";
+        
+        // Optional: Alert the user or log to console
+        console.log(""Print Format changed to Credit Note"");
+        
+    } else {
+        // Set the default print format back to your regular Sales Invoice format
+        // Replace 'Standard' with the name of your default Sales Invoice print format if you use a custom one
+        frm.meta.default_print_format = ""Standard""; 
+    }
+}"
+Valid Til,Quotation,Form,,1,"frappe.ui.form.on('Quotation', {
+    refresh: function(frm) {
+        if (frm.doc.__islocal && !frm.doc.valid_till) {
+            let quotation_date = frappe.datetime.str_to_obj(frm.doc.transaction_date);
+            // Example: Add 90 days
+            let valid_till = frappe.datetime.add_days(quotation_date, 2);
+            frm.set_value('valid_till', frappe.datetime.obj_to_str(valid_till));
+        }
+    }
+});
+"
+New Item Creation Mandatory Fields,Item,Form,,1,"frappe.ui.form.on(""Item"", {
+  validate(frm) {
+    // Run only for brand new Item creation
+    
+    console.log(""Validate fired! is_new ="", frm.is_new(), 
+            ""recalls ="", frm.doc.custom_recalls_checked,
+            ""temperature ="", frm.doc.custom_temperature_checked);
+
+    if (frm.is_new()) {
+      let missing = [];
+
+      if (!frm.doc.custom_recalls_checked) {
+        missing.push(""Recalls Checked"");
+      }
+
+      if (!frm.doc.custom_temperature_checked) {
+        missing.push(""Temperature Checked"");
+      }
+
+      if (missing.length > 0) {
+        frappe.throw(
+          __(""Please check the following before saving this new Item:<br><br>"") +
+          missing.join(""<br>"")
+        );
+      }
+    }
+  }
+});
+"
+Quotation Warning Customer is Locked,Quotation,Form,,1,"frappe.ui.form.on([""Quotation"", ""Sales Order""], {
+  onload(frm) {
+    // Attach listener directly to the customer field once the form loads
+    frm.fields_dict.customer.df.onchange = () => {
+      if (frm.doc.customer) {
+        check_customer_lock(frm);
+      }
+    };
+  },
+
+  refresh(frm) {
+    // Also check when loading or refreshing
+    if (frm.doc.customer) {
+      check_customer_lock(frm);
+    }
+  },
+
+  validate(frm) {
+    // Block saving if locked
+    if (frm.doc.customer) {
+      frappe.call({
+        method: ""frappe.client.get_value"",
+        args: {
+          doctype: ""Customer"",
+          fieldname: ""custom_account_locked"",
+          filters: { name: frm.doc.customer }
+        },
+        async: false,
+        callback: function (r) {
+          if (r.message && r.message.custom_account_locked) {
+            frappe.throw(__(""This customer is locked and cannot be used for "" + frm.doctype + "".""));
+          }
+        }
+      });
+    }
+  }
+});
+
+function check_customer_lock(frm) {
+  frappe.call({
+    method: ""frappe.client.get_value"",
+    args: {
+      doctype: ""Customer"",
+      fieldname: ""custom_account_locked"",
+      filters: { name: frm.doc.customer }
+    },
+    callback: function (r) {
+      if (r.message && r.message.custom_account_locked) {
+        frappe.msgprint({
+          title: __(""Customer Locked""),
+          message: __(""This customer is locked and cannot be used for "" + frm.doctype + "".""),
+          indicator: ""red""
+        });
+        frm.set_value(""customer"", null);
+      }
+    }
+  });
+}
+"
+Sales OrderWarning Customer is Locked,Sales Order,Form,,1,"frappe.ui.form.on('Sales Order', {
+  customer: function(frm) {
+    if (!frm.doc.customer) return;
+
+    frappe.call({
+      method: ""frappe.client.get"",
+      args: {
+        doctype: ""Customer"",
+        name: frm.doc.customer
+      },
+      callback: function(r) {
+        if (r.message && r.message.custom_account_locked) {
+          frappe.msgprint({
+            title: __(""Customer Locked""),
+            message: __(""This customer is locked and cannot be used for Sales Orders.""),
+            indicator: ""red""
+          });
+        }
+      }
+    });
+  }
+});"
+Overdue Banner,Customer,Form,,1,"frappe.ui.form.on(""Customer"", {
+    refresh(frm) {
+        update_lock_banner(frm);
+    },
+
+    // Trigger when overdue days field changes
+    custom_account_lock_days_overdue(frm) {
+        update_lock_banner(frm);
+    }
+});
+
+// --- Helper function ---
+function update_lock_banner(frm) {
+    const overdue_field = ""custom_account_lock_days_overdue"";  // numeric field for overdue days
+    const lock_field = ""custom_lock_status"";                   // HTML field for banner
+
+    const overdue_days = frm.doc[overdue_field] || 0;
+
+    console.log(""Overdue days:"", overdue_days);  // DEBUG: confirm value
+
+    let banner_html = """";
+
+    if (overdue_days >= 50) {
+        // 🔴 HARD LOCK
+        banner_html = `
+            <div style=""
+                background-color: #f8d7da;
+                color: #721c24;
+                padding: 10px;
+                border-radius: 5px;
+                font-weight: bold;
+                border: 1px solid #f5c6cb;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            "">
+                <i class=""fa fa-lock""></i>
+                CUSTOMER IS HARD LOCKED (50+ DAYS OVERDUE)
+            </div>`;
+    } else if (overdue_days >= 40) {
+        // 🟡 SOFT LOCK
+        banner_html = `
+            <div style=""
+                background-color: #fff3cd;
+                color: #856404;
+                padding: 10px;
+                border-radius: 5px;
+                font-weight: bold;
+                border: 1px solid #ffeeba;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            "">
+                <i class=""fa fa-exclamation-triangle""></i>
+                CUSTOMER IS SOFT LOCKED (40+ DAYS OVERDUE) SEE ACCOUNTING
+            </div>`;
+    }
+
+    // Render banner or hide if empty
+    if (frm.fields_dict[lock_field]) {
+        frm.fields_dict[lock_field].$wrapper.html(banner_html);
+
+        if (!banner_html) {
+            $(frm.fields_dict[lock_field].wrapper).hide();
+        } else {
+            $(frm.fields_dict[lock_field].wrapper).show();
+        }
+    } else {
+        console.warn(""Lock HTML field not found:"", lock_field);
+    }
+}
+
+"
+Auto populate sales person on Sales Orders,Sales Order,Form,,1,"frappe.ui.form.on('Sales Order', {
+    onload: function(frm) {
+        // Only run this logic for a new Sales Order (draft status) and if Sales Team is empty
+        if (frm.doc.docstatus === 0 && frm.doc.__islocal === 1 && frm.doc.sales_team.length === 0) {
+            
+            // Call a safer method that handles the Sales Person lookup
+            frappe.call({
+                method: ""frappe.client.get"",
+                args: {
+                    doctype: ""User"",
+                    name: frappe.session.user
+                },
+                callback: function(r) {
+                    if (r.message) {
+                        var sales_person_name = null;
+                        
+                        // Try to get sales_person field if it exists
+                        if (r.message.sales_person) {
+                            sales_person_name = r.message.sales_person;
+                        }
+                        // Alternative: Check if there's an employee link, then get sales person from employee
+                        else if (r.message.employee) {
+                            frappe.call({
+                                method: ""frappe.client.get"",
+                                args: {
+                                    doctype: ""Employee"",
+                                    name: r.message.employee
+                                },
+                                callback: function(emp_r) {
+                                    if (emp_r.message && emp_r.message.name) {
+                                        // Check if there's a Sales Person with the same name as Employee
+                                        frappe.call({
+                                            method: ""frappe.client.get_list"",
+                                            args: {
+                                                doctype: ""Sales Person"",
+                                                filters: {
+                                                    ""employee"": emp_r.message.name
+                                                },
+                                                fields: [""name""],
+                                                limit: 1
+                                            },
+                                            callback: function(sp_r) {
+                                                if (sp_r.message && sp_r.message.length > 0) {
+                                                    add_sales_person_to_team(frm, sp_r.message[0].name);
+                                                }
+                                            }
+                                        });
+                                    }
+                                }
+                            });
+                            return; // Exit here since we're doing async lookup
+                        }
+                        
+                        // If we found a sales person directly, add them
+                        if (sales_person_name) {
+                            add_sales_person_to_team(frm, sales_person_name);
+                        }
+                    }
+                },
+                error: function(r) {
+                    // Silently handle error - don't show to user
+                    console.log(""Could not fetch user sales person"");
+                }
+            });
+        }
+    }
+});
+
+function add_sales_person_to_team(frm, sales_person_name) {
+    // Clear any existing rows (should be zero, but good practice)
+    frm.clear_table('sales_team');
+    
+    // Add a new row to the Sales Team child table
+    var new_row = frm.add_child('sales_team');
+    
+    // Set the Sales Person and their contribution
+    frappe.model.set_value(new_row.doctype, new_row.name, 'sales_person', sales_person_name);
+    frappe.model.set_value(new_row.doctype, new_row.name, 'contribution', 100);
+    
+    // Refresh the Sales Team grid
+    frm.refresh_field('sales_team');
+    
+    frappe.show_alert({
+        message: __(""Sales Person set to {0}"", [sales_person_name]),
+        indicator: 'green'
+    }, 5);
+}"
+Customer Purchase History,Customer,Form,,1,"frappe.ui.form.on('Customer', {
+    refresh: function(frm) {
+        if (!frm.is_new()) {
+            frm.add_custom_button(__('Purchase History'), function() {
+                frappe.set_route('query-report', 'Customer Item Purchase History', {
+                    'customer': frm.doc.name  // lowercase
+                });
+            }, __('Reports'));
+        }
+    }
+});"
