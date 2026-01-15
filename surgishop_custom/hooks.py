@@ -1,4 +1,9 @@
 app_name = "surgishop_custom"
+app_title = "SurgiShop Custom"
+app_publisher = "SurgiShop"
+app_description = "Client and Server Scripts"
+app_email = "gary.starr@surgishop.com"
+app_license = "MIT"
 
 # 1. Connect Client Scripts (JS)
 doctype_js = {
